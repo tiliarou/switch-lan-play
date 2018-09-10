@@ -4,7 +4,6 @@
 #include "packet.h"
 #include "ipv4/ipv4.h"
 #include <base/llog.h>
-#include <math.h>
 #include <lwip/init.h>
 #include <lwip/ip.h>
 #include <lwip/ip_addr.h>

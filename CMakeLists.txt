@@ -55,6 +55,8 @@ set(SOURCE_FILES
     src/ipv4/tcp.c
     src/ipv4/udp.c
     src/ipv4/icmp.c
+
+    src/uv_lwip.c
 )
 
 add_executable (lan-play ${SOURCE_FILES})

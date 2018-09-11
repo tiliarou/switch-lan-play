@@ -41,6 +41,8 @@ static uv_once_t uvl_init_once = UV_ONCE_INIT;
 })
 #define LMIN(a, b) ( ((a) < (b)) ? (a) : (b) )
 
+static void uvl_imp_write_to_tcp(uvl_tcp_t *client);
+
 static void addr_from_lwip(void *ip, const ip_addr_t *ip_addr)
 {
     if (IP_IS_V6(ip_addr)) {
@@ -135,7 +137,7 @@ static void uvl_async_tcp_write_cb(uv_async_t *async)
 
 static int uvl_imp_write_buf_to_tcp(uvl_tcp_t *client, uvl_write_t *req)
 {
-    uv_buf_t *buf = &req->send_bufs[req->sent_bufs];
+    const   uv_buf_t *buf = &req->send_bufs[req->sent_bufs];
 
     do {
         int to_write = LMIN(buf->len - req->sent, tcp_sndbuf(client->pcb));

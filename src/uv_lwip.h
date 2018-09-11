@@ -24,6 +24,7 @@ typedef void (*uvl_write_cb)(uvl_write_t *req, int status);
 typedef void (*uvl_alloc_cb)(uvl_tcp_t *handle, size_t suggested_size, uv_buf_t* buf);
 typedef void (*uvl_shutdown_cb)(uvl_shutdown_t *req, int status);
 
+struct uvl_tcp_buf;
 struct uvl {
     UVL_FIELDS
 
@@ -36,8 +37,10 @@ struct uvl {
 struct uvl_tcp {
     UVL_FIELDS
     uvl_t *handle;
+    struct uvl_tcp_buf *recv_buf;
 
-    int reading;
+    int closed;
+    uvl_read_cb read_cb;
     struct sockaddr_in local_addr;
     struct sockaddr_in remote_addr;
 };

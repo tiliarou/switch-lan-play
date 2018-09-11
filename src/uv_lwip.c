@@ -10,6 +10,13 @@
 #include <lwip/ip6_frag.h>
 #include <string.h>
 
+#define UVL_TCP_BUF_LEN TCP_WND
+
+struct uvl_tcp_buf {
+    uint8_t buf[UVL_TCP_BUF_LEN];
+    uint16_t used;
+};
+
 static uv_once_t uvl_init_once = UV_ONCE_INIT;
 
 static void addr_from_lwip(void *ip, const ip_addr_t *ip_addr)
@@ -29,7 +36,33 @@ static void uvl_client_err_func (void *arg, err_t err)
 
 static err_t uvl_client_recv_func (void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
 {
+    uvl_tcp_t *client = (uvl_tcp_t *)arg;
+    ASSERT(!client->closed)
+    ASSERT(err == ERR_OK)
 
+    if (!p) {
+        // close
+    } else {
+        ASSERT(p->tot_len > 0)
+
+        if (p->tot_len > sizeof(client->recv_buf->buf) - client->recv_buf->used) {
+            LLOG(LLOG_ERROR, "no buffer for data !?!");
+
+            return ERR_MEM;
+        }
+
+        ASSERT(pbuf_copy_partial(p, client->recv_buf->buf + client->recv_buf->used, p->tot_len, 0) == p->tot_len)
+        client->recv_buf->used += p->tot_len;
+
+        int p_tot_len = p->tot_len;
+        pbuf_free(p);
+
+        if (client->recv_buf->used == p_tot_len) {
+            client_send_to_socks(client);
+        }
+    }
+
+    return ERR_OK;
 }
 
 static err_t uvl_client_sent_func (void *arg, struct tcp_pcb *tpcb, u16_t len)
@@ -112,11 +145,20 @@ static err_t uvl_netif_input_func(struct pbuf *p, struct netif *inp)
     return ERR_OK;
 }
 
+static int uvl_on_read(uvl_tcp_t *client)
+{
+
+}
+
 int uvl_read_start(uvl_tcp_t *client, uvl_alloc_cb alloc_cb, uvl_read_cb read_cb)
 {
-    ASSERT(client->reading == 0)
+    if (client->read_cb) {
+        return UV_EALREADY;
+    }
 
+    client->read_cb = read_cb;
 
+    return uvl_on_read(client);
 }
 
 int uvl_accept(uvl_t *handle, uvl_tcp_t *client)
@@ -193,7 +235,8 @@ int uvl_tcp_init(uv_loop_t *loop, uvl_tcp_t *client)
 {
     client->loop = loop;
     client->handle = NULL;
-    client->reading = 0;
+    client->read_cb = NULL;
+    client->recv_buf = (struct uvl_tcp_buf *)malloc(sizeof(struct uvl_tcp_buf));
 
     memset(&client->local_addr, 0, sizeof(client->local_addr));
     memset(&client->remote_addr, 0, sizeof(client->remote_addr));

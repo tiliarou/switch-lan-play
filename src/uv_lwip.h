@@ -40,11 +40,17 @@ struct uvl_tcp {
     UVL_FIELDS
     uvl_t *handle;
     struct uvl_tcp_buf *recv_buf;
+    const uv_buf_t *send_bufs;
+    unsigned int send_nbufs;
 
     uv_async_t read_req;
+    uv_async_t write_req;
+
     int closed;
     uvl_alloc_tcp_cb alloc_cb;
     uvl_read_cb read_cb;
+    uvl_write_cb write_cb;
+    struct tcp_pcb *pcb;
     struct sockaddr_in local_addr;
     struct sockaddr_in remote_addr;
 };
@@ -59,7 +65,7 @@ struct uvl_shutdown {
 
 int uvl_init(uv_loop_t *loop, uvl_t *handle);
 int uvl_bind(uvl_t *handle, uvl_output_fn output);
-int uvl_input(uvl_t *handle, const uv_buf_t buf[], unsigned int nbufs);
+int uvl_input(uvl_t *handle, const uv_buf_t buf);
 int uvl_listen(uvl_t *handle, uvl_connection_cb connection_cb);
 int uvl_accept(uvl_t *handle, uvl_tcp_t *client);
 int uvl_close(uvl_t *handle, uvl_close_cb close_cb);

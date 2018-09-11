@@ -34,6 +34,31 @@ static void uvl_client_err_func (void *arg, err_t err)
 
 }
 
+static void uvl_async_tcp_send_cb(uv_async_t *req)
+{
+    uvl_tcp_t *client = (uvl_tcp_t *)req->data;
+
+    client->read_cb(client, )
+}
+
+static int uvl_tcp_on_read(uvl_tcp_t *client)
+{
+    struct uvl_tcp_buf *recv_buf = client->recv_buf;
+
+    if (client->read_cb && recv_buf->used > 0) {
+        if (client->read_req.data == NULL) {
+            uv_buf_t buf;
+            client->alloc_cb(client, 65536, &buf);
+            client->read_req.data = client;
+
+            memcpy(buf.base, recv_buf->buf, buf.len);
+            recv_buf->used = 0;
+        }
+    }
+
+    return 0;
+}
+
 static err_t uvl_client_recv_func (void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
 {
     uvl_tcp_t *client = (uvl_tcp_t *)arg;
@@ -42,6 +67,8 @@ static err_t uvl_client_recv_func (void *arg, struct tcp_pcb *tpcb, struct pbuf 
 
     if (!p) {
         // close
+
+        return ERR_OK;
     } else {
         ASSERT(p->tot_len > 0)
 
@@ -54,15 +81,12 @@ static err_t uvl_client_recv_func (void *arg, struct tcp_pcb *tpcb, struct pbuf 
         ASSERT(pbuf_copy_partial(p, client->recv_buf->buf + client->recv_buf->used, p->tot_len, 0) == p->tot_len)
         client->recv_buf->used += p->tot_len;
 
-        int p_tot_len = p->tot_len;
         pbuf_free(p);
 
-        if (client->recv_buf->used == p_tot_len) {
-            client_send_to_socks(client);
-        }
-    }
+        int ret = uvl_tcp_on_read(client);
 
-    return ERR_OK;
+        return ret == 0 ? ERR_OK : ERR_ABRT;
+    }
 }
 
 static err_t uvl_client_sent_func (void *arg, struct tcp_pcb *tpcb, u16_t len)
@@ -145,20 +169,16 @@ static err_t uvl_netif_input_func(struct pbuf *p, struct netif *inp)
     return ERR_OK;
 }
 
-static int uvl_on_read(uvl_tcp_t *client)
-{
-
-}
-
 int uvl_read_start(uvl_tcp_t *client, uvl_alloc_cb alloc_cb, uvl_read_cb read_cb)
 {
     if (client->read_cb) {
         return UV_EALREADY;
     }
 
+    client->alloc_cb = alloc_cb;
     client->read_cb = read_cb;
 
-    return uvl_on_read(client);
+    return uvl_tcp_on_read(client);
 }
 
 int uvl_accept(uvl_t *handle, uvl_tcp_t *client)
@@ -236,7 +256,11 @@ int uvl_tcp_init(uv_loop_t *loop, uvl_tcp_t *client)
     client->loop = loop;
     client->handle = NULL;
     client->read_cb = NULL;
+    client->alloc_cb = NULL;
     client->recv_buf = (struct uvl_tcp_buf *)malloc(sizeof(struct uvl_tcp_buf));
+
+    uv_async_init(loop, &client->read_req, uvl_async_tcp_send_cb);
+    client->read_req.data = NULL;
 
     memset(&client->local_addr, 0, sizeof(client->local_addr));
     memset(&client->remote_addr, 0, sizeof(client->remote_addr));

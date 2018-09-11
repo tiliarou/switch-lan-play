@@ -73,5 +73,6 @@ if (WIN32)
 else()
     target_link_libraries(lan-play pthread)
 
+    target_link_libraries(uvl_test ws2_32.lib iphlpapi.lib libwinpthread.a psapi userenv.lib)
     target_link_libraries(uvl_test pthread)
 endif()

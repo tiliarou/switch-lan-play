@@ -14,15 +14,17 @@ typedef struct uvl uvl_t;
 typedef struct uvl_tcp uvl_tcp_t;
 typedef struct uvl_write uvl_write_t;
 typedef struct uvl_shutdown uvl_shutdown_t;
+
 typedef int (*uvl_output_fn)(uvl_t *handle, const uv_buf_t bufs[], unsigned int nbufs);
-typedef void (*uvl_alloc_tcp_cb)(uvl_t *handle, size_t suggested_size, uv_buf_t* buf);
 typedef void (*uvl_close_cb)(uvl_t *handle);
-typedef void (*uvl_tcp_close_cb)(uvl_tcp_t *handle);
 typedef void (*uvl_connection_cb)(uvl_t *handle, int status);
+
+typedef void (*uvl_alloc_tcp_cb)(uvl_tcp_t *client, size_t suggested_size, uv_buf_t* buf);
 typedef void (*uvl_read_cb)(uvl_tcp_t *handle, ssize_t nread, const uv_buf_t *buf);
 typedef void (*uvl_write_cb)(uvl_write_t *req, int status);
 typedef void (*uvl_alloc_cb)(uvl_tcp_t *handle, size_t suggested_size, uv_buf_t* buf);
 typedef void (*uvl_shutdown_cb)(uvl_shutdown_t *req, int status);
+typedef void (*uvl_tcp_close_cb)(uvl_tcp_t *handle);
 
 struct uvl_tcp_buf;
 struct uvl {
@@ -39,7 +41,9 @@ struct uvl_tcp {
     uvl_t *handle;
     struct uvl_tcp_buf *recv_buf;
 
+    uv_async_t read_req;
     int closed;
+    uvl_alloc_tcp_cb alloc_cb;
     uvl_read_cb read_cb;
     struct sockaddr_in local_addr;
     struct sockaddr_in remote_addr;

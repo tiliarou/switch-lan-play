@@ -2,6 +2,7 @@
 #include <uv_lwip.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <pcap.h>
 
 char resp[] = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nX-Organization: Nintendo\r\n\r\nok";
 uv_loop_t loop;
@@ -43,7 +44,34 @@ void on_connect(uvl_t *handle, int status)
     uvl_read_start(client, alloc_cb, read_cb);
 }
 
+void on_pcap(u_char *unused, const struct pcap_pkthdr *hdr, const u_char *packet)
+{
+    printf("%d\n", hdr->len);
+}
 
+void thread_pcap(void *data)
+{
+    struct bpf_program bpf;
+    char ebuf[PCAP_ERRBUF_SIZE];
+    char *dev;
+    pcap_t *pd;
+
+    dev = pcap_lookupdev(ebuf);
+    if (dev == NULL) {
+        puts(ebuf);
+        return;
+    }
+    printf("capture on %s\n", dev);
+    pd = pcap_open_live(dev, 1024, 0, 1000, ebuf);
+    assert(pd);
+
+    assert(pcap_compile(pd, &bpf, "net 10.13.0.0/16", 1, 0) == 0);
+    assert(pcap_setfilter(pd, &bpf) == 0);
+
+    pcap_loop(pd, 5, on_pcap, NULL);
+
+    pcap_close(pd);
+}
 
 int main()
 {
@@ -52,6 +80,9 @@ int main()
     assert(uvl_init(&loop, &uvl) == 0);
 
     assert(uvl_listen(&uvl, on_connect) == 0);
+
+    uv_thread_t tid;
+    assert(uv_thread_create(&tid, thread_pcap, &uvl) == 0);
 
     return uv_run(&loop, UV_RUN_DEFAULT);
 }

@@ -112,6 +112,7 @@ static void uvl_async_tcp_read_cb(uv_async_t *req)
         } else {
             memcpy(b.base, buf->recv_buf, buf->recv_used);
             tcp_recved(client->pcb, buf->recv_used);
+            status = buf->recv_used;
             buf->recv_used = 0;
         }
     } else {
@@ -175,13 +176,12 @@ static void uvl_imp_write_to_tcp(uvl_tcp_t *client)
     ASSERT(client->cur_write)
 
     uvl_write_t *req = client->cur_write;
-
-
-    while (req->sent_bufs == req->send_nbufs) {
+// TODO bugs here
+    while (req && req->sent_bufs == req->send_nbufs) {
         req = req->next;
     }
 
-    while (req->sent_bufs < req->send_nbufs) {
+    while (req && req->sent_bufs < req->send_nbufs) {
         if (uvl_imp_write_buf_to_tcp(client, req)) {
             break;
         }
@@ -291,6 +291,7 @@ static err_t uvl_listener_accept_func (void *arg, struct tcp_pcb *newpcb, err_t 
     if (ret) goto fail;
     ret = uv_async_send(&req->async);
     if (ret) goto fail;
+    req->newpcb = newpcb;
 
     return ERR_OK;
 fail:
@@ -558,6 +559,7 @@ int uvl_input(uvl_t *handle, const uv_buf_t buf)
     input->async.data = handle;
     ret = uv_async_send(&input->async);
     if (ret) goto fail;
+    input->p = p;
 
     return 0;
 fail:

@@ -8,8 +8,7 @@
 
 #define UVL_FIELDS                                  \
     void *data;                                     \
-    uv_loop_t *loop;                                \
-    uv_close_cb close_cb;
+    uv_loop_t *loop;
 
 typedef struct uvl uvl_t;
 typedef struct uvl_tcp uvl_tcp_t;
@@ -18,7 +17,8 @@ typedef struct uvl_shutdown uvl_shutdown_t;
 typedef int (*uvl_output_fn)(uvl_t *handle, const uv_buf_t bufs[], unsigned int nbufs);
 typedef void (*uvl_alloc_tcp_cb)(uvl_t *handle, size_t suggested_size, uv_buf_t* buf);
 typedef void (*uvl_close_cb)(uvl_t *handle);
-typedef void (*uvl_connection_cb)(uvl_t *handle, int status, uvl_tcp_t *tcp);
+typedef void (*uvl_tcp_close_cb)(uvl_tcp_t *handle);
+typedef void (*uvl_connection_cb)(uvl_t *handle, int status);
 typedef void (*uvl_read_cb)(uvl_tcp_t *handle, ssize_t nread, const uv_buf_t *buf);
 typedef void (*uvl_write_cb)(uvl_write_t *req, int status);
 typedef void (*uvl_alloc_cb)(uvl_tcp_t *handle, size_t suggested_size, uv_buf_t* buf);
@@ -29,13 +29,17 @@ struct uvl {
 
     uvl_output_fn output;
     uvl_connection_cb connection_cb;
-    uv_alloc_cb alloc_cb;
     struct netif *the_netif;
     struct tcp_pcb *listener;
+    struct tcp_pcb *waiting_pcb;
 };
 struct uvl_tcp {
     UVL_FIELDS
     uvl_t *handle;
+
+    int reading;
+    struct sockaddr_in local_addr;
+    struct sockaddr_in remote_addr;
 };
 struct uvl_write {
     UVL_FIELDS
@@ -49,10 +53,13 @@ struct uvl_shutdown {
 int uvl_init(uv_loop_t *loop, uvl_t *handle);
 int uvl_bind(uvl_t *handle, uvl_output_fn output);
 int uvl_input(uvl_t *handle, const uv_buf_t buf[], unsigned int nbufs);
-int uvl_listen_start(uvl_t *handle, uvl_alloc_tcp_cb alloc_cb, uvl_connection_cb connection_cb);
+int uvl_listen(uvl_t *handle, uvl_connection_cb connection_cb);
+int uvl_accept(uvl_t *handle, uvl_tcp_t *client);
 int uvl_close(uvl_t *handle, uvl_close_cb close_cb);
 int uvl_read_start(uvl_tcp_t *client, uvl_alloc_cb alloc_cb, uvl_read_cb read_cb);
 int uvl_write(uvl_write_t *req, uvl_tcp_t *client, const uv_buf_t bufs[], unsigned int nbufs, uvl_write_cb cb);
 int uvl_shutdown(uvl_shutdown_t *req, uvl_tcp_t *client, uvl_shutdown_cb cb);
+int uvl_tcp_init(uv_loop_t *loop, uvl_tcp_t *client);
+int uvl_tcp_close(uvl_tcp_t *client, uvl_tcp_close_cb close_cb);
 
 #endif // _UVL_LWIP_H_

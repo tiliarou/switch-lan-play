@@ -1,6 +1,6 @@
+#include <lwip/init.h>
 #include "uv_lwip.h"
 #include <base/llog.h>
-#include <lwip/init.h>
 #include <lwip/ip.h>
 #include <lwip/ip_addr.h>
 #include <lwip/priv/tcp_priv.h>
@@ -8,10 +8,11 @@
 #include <lwip/ip4_frag.h>
 #include <lwip/nd6.h>
 #include <lwip/ip6_frag.h>
+#include <string.h>
 
 static uv_once_t uvl_init_once = UV_ONCE_INIT;
 
-void addr_from_lwip(void *ip, const ip_addr_t *ip_addr)
+static void addr_from_lwip(void *ip, const ip_addr_t *ip_addr)
 {
     if (IP_IS_V6(ip_addr)) {
         LLOG(LLOG_ERROR, "ipv6 not support now");
@@ -39,23 +40,21 @@ static err_t uvl_client_sent_func (void *arg, struct tcp_pcb *tpcb, u16_t len)
 static err_t uvl_listener_accept_func (void *arg, struct tcp_pcb *newpcb, err_t err)
 {
     uvl_t *handle = (uvl_t *)arg;
+
+    ASSERT(handle->listener)
+    ASSERT(handle->connection_cb)
+    ASSERT(handle->waiting_pcb == NULL)
+
     uv_loop_t *loop = handle->loop;
-    uint8_t local_addr[4];
-    uint8_t remote_addr[4];
-    struct sockaddr_in dest;
 
-    addr_from_lwip(local_addr, &newpcb->local_ip);
-    addr_from_lwip(remote_addr, &newpcb->remote_ip);
+    handle->waiting_pcb = newpcb;
+    handle->connection_cb(handle, 0);
 
-    dest.sin_family = AF_INET;
-    dest.sin_addr = *((struct in_addr *)local_addr);
-    dest.sin_port = htons(newpcb->local_port);
-
-    tcp_arg(newpcb, handle);
-
-    tcp_err(newpcb, uvl_client_err_func);
-    tcp_recv(newpcb, uvl_client_recv_func);
-    tcp_sent(newpcb, uvl_client_sent_func);
+    // not accept?
+    if (handle->waiting_pcb != NULL) {
+        // send rst
+        tcp_abort(newpcb);
+    }
 
     return ERR_OK;
 }
@@ -113,6 +112,47 @@ static err_t uvl_netif_input_func(struct pbuf *p, struct netif *inp)
     return ERR_OK;
 }
 
+int uvl_read_start(uvl_tcp_t *client, uvl_alloc_cb alloc_cb, uvl_read_cb read_cb)
+{
+    ASSERT(client->reading == 0)
+
+
+}
+
+int uvl_accept(uvl_t *handle, uvl_tcp_t *client)
+{
+    ASSERT(handle->waiting_pcb)
+    ASSERT(client->loop == handle->loop)
+    ASSERT(client->handle == NULL)
+
+    struct tcp_pcb *newpcb = handle->waiting_pcb;
+    uint8_t local_addr[4];
+    uint8_t remote_addr[4];
+
+    addr_from_lwip(local_addr, &newpcb->local_ip);
+    addr_from_lwip(remote_addr, &newpcb->remote_ip);
+
+    client->handle = handle;
+
+    client->local_addr.sin_family = AF_INET;
+    client->local_addr.sin_addr = *((struct in_addr *)local_addr);
+    client->local_addr.sin_port = htons(newpcb->local_port);
+
+    client->remote_addr.sin_family = AF_INET;
+    client->remote_addr.sin_addr = *((struct in_addr *)remote_addr);
+    client->remote_addr.sin_port = htons(newpcb->remote_port);
+
+    tcp_arg(newpcb, client);
+
+    tcp_err(newpcb, uvl_client_err_func);
+    tcp_recv(newpcb, uvl_client_recv_func);
+    tcp_sent(newpcb, uvl_client_sent_func);
+
+    handle->waiting_pcb = NULL;
+
+    return 0;
+}
+
 int uvl_init_lwip(uvl_t *handle)
 {
     struct netif *the_netif = (struct netif *)malloc(sizeof(struct netif));
@@ -149,13 +189,27 @@ fail:
     return -1;
 }
 
+int uvl_tcp_init(uv_loop_t *loop, uvl_tcp_t *client)
+{
+    client->loop = loop;
+    client->handle = NULL;
+    client->reading = 0;
+
+    memset(&client->local_addr, 0, sizeof(client->local_addr));
+    memset(&client->remote_addr, 0, sizeof(client->remote_addr));
+
+    return 0;
+}
+
 int uvl_init(uv_loop_t *loop, uvl_t *handle)
 {
     handle->loop = loop;
-    handle->listener = NULL;
-    handle->alloc_cb = NULL;
-    handle->close_cb = NULL;
+    handle->output = NULL;
     handle->connection_cb = NULL;
+
+    handle->listener = NULL;
+    handle->waiting_pcb = NULL;
+
     return uvl_init_lwip(handle);
 }
 
@@ -171,9 +225,8 @@ int uvl_input(uvl_t *handle, const uv_buf_t buf[], unsigned int nbufs)
 
 }
 
-int uvl_listen_start(uvl_t *handle, uv_alloc_cb alloc_cb, uvl_connection_cb connection_cb)
+int uvl_listen(uvl_t *handle, uvl_connection_cb connection_cb)
 {
-    handle->alloc_cb = alloc_cb;
     handle->connection_cb = connection_cb;
 
     // init listener

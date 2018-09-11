@@ -42,6 +42,7 @@ static uv_once_t uvl_init_once = UV_ONCE_INIT;
 #define LMIN(a, b) ( ((a) < (b)) ? (a) : (b) )
 
 static void uvl_imp_write_to_tcp(uvl_tcp_t *client);
+static int uvl_new_connection_req(uvl_t *handle);
 
 static void addr_from_lwip(void *ip, const ip_addr_t *ip_addr)
 {
@@ -519,6 +520,11 @@ int uvl_init(uv_loop_t *loop, uvl_t *handle)
     handle->listener = NULL;
     handle->waiting_pcb = NULL;
 
+    int ret;
+
+    ret = uv_async_init(loop, &handle->listen, NULL); // TODO
+    if (ret) return ret;
+
     return uvl_init_lwip(handle);
 }
 
@@ -562,6 +568,7 @@ fail_malloc:
 
 int uvl_listen(uvl_t *handle, uvl_connection_cb connection_cb)
 {
+
     handle->connection_cb = connection_cb;
 
     // init listener

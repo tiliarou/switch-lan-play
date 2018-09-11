@@ -3,12 +3,26 @@
 #include <assert.h>
 #include <stdlib.h>
 
+char resp[] = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nX-Organization: Nintendo\r\n\r\nok";
 uv_loop_t loop;
 uvl_t uvl;
 
-void read_cb(uvl_tcp_t *handle, ssize_t nread, const uv_buf_t *buf)
+void write_cb()
 {
 
+}
+
+void read_cb(uvl_tcp_t *handle, ssize_t nread, const uv_buf_t *buf)
+{
+    uvl_write_t *req = malloc(sizeof(uvl_write_t));
+    uv_buf_t b;
+
+    b.base = resp;
+    b.len = strlen(resp);
+
+    printf(buf->base);
+
+    uvl_write(req, handle, &b, 1, write_cb);
 }
 
 void alloc_cb(uvl_tcp_t *handle, size_t suggested_size, uv_buf_t* buf)
@@ -28,6 +42,8 @@ void on_connect(uvl_t *handle, int status)
 
     uvl_read_start(client, alloc_cb, read_cb);
 }
+
+
 
 int main()
 {

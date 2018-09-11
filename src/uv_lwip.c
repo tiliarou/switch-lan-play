@@ -10,15 +10,21 @@
 #include <lwip/ip6_frag.h>
 #include <string.h>
 
-#define UVL_TCP_BUF_LEN TCP_WND
+#define UVL_TCP_RECV_BUF_LEN TCP_WND
+#define UVL_TCP_SEND_BUF_LEN 8192
 #define UVL_RECV_BUF_MUTEX 0
 
-struct uvl_tcp_buf {
-    uint8_t buf[UVL_TCP_BUF_LEN];
-    uint16_t used;
+struct uvl_tcp_recv_buf {
+    uint8_t recv_buf[UVL_TCP_RECV_BUF_LEN];
+    uint16_t recv_used;
 #if UVL_RECV_BUF_MUTEX
     uv_mutex_t mutex;
 #endif
+};
+
+struct uvl_tcp_send_buf {
+    uint8_t send_buf[UVL_TCP_RECV_BUF_LEN];
+    uint16_t send_used;
 };
 
 struct uvl_connection_req {
@@ -36,6 +42,7 @@ static uv_once_t uvl_init_once = UV_ONCE_INIT;
     const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
     (type *)( (char *)__mptr - offsetof(type, member) );    \
 })
+#define LMIN(a, b) ( ((a) < (b)) ? (a) : (b) )
 
 static void addr_from_lwip(void *ip, const ip_addr_t *ip_addr)
 {
@@ -85,45 +92,46 @@ static void uvl_async_connection_cb(uv_async_t *req)
 static void uvl_async_tcp_read_cb(uv_async_t *req)
 {
     uvl_tcp_t *client = (uvl_tcp_t *)req->data;
-    struct uvl_tcp_buf *recv_buf = client->recv_buf;
-    uv_buf_t buf;
+    struct uvl_tcp_recv_buf *buf = client->buf;
+    uv_buf_t b;
     int status = 0;
     int call_cb = 1;
 
 #if UVL_RECV_BUF_MUTEX
-    uv_mutex_lock(&recv_buf->mutex);
+    uv_mutex_lock(&buf->mutex);
 #endif
-    if (client->read_cb && recv_buf->used > 0) {
-        client->alloc_cb(client, 65536, &buf);
+    if (client->read_cb && buf->recv_used > 0) {
+        client->alloc_cb(client, 65536, &b);
 
-        if (buf.base == NULL || buf.len < recv_buf->used) {
+        if (b.base == NULL || b.len < buf->recv_used) {
             status = UV_ENOBUFS;
         } else {
-            memcpy(buf.base, recv_buf->buf, recv_buf->used);
-            tcp_recved(client->pcb, recv_buf->used);
-            recv_buf->used = 0;
+            memcpy(b.base, buf->recv_buf, buf->recv_used);
+            tcp_recved(client->pcb, buf->recv_used);
+            buf->recv_used = 0;
         }
     } else {
         call_cb = 0;
     }
 #if UVL_RECV_BUF_MUTEX
-    uv_mutex_unlock(&recv_buf->mutex);
+    uv_mutex_unlock(&buf->mutex);
 #endif
 
     if (call_cb) {
-        client->read_cb(client, status, &buf);
+        client->read_cb(client, status, &b);
         client->read_cb = NULL;
     }
 }
 
 // TODO: complete this function
-static void uvl_async_tcp_write_cb(uv_async_t *req)
+static void uvl_async_tcp_write_cb(uv_async_t *async)
 {
-    uvl_tcp_t *client = (uvl_tcp_t *)req->data;
-    ASSERT(client->write_cb)
+    uvl_write_t *req = (uvl_write_t *)async->data;
+    uvl_tcp_t *client = req->client;
+    ASSERT(client->cur_write)
 
     // do {
-    //     int to_write = bmin_int(client->socks_recv_buf_used - client->socks_recv_buf_sent, tcp_sndbuf(client->pcb));
+    //     int to_write = LMIN(client->socks_recv_buf_used - client->socks_recv_buf_sent, tcp_sndbuf(client->pcb));
     //     if (to_write == 0) {
     //         break;
     //     }
@@ -144,7 +152,7 @@ static void uvl_async_tcp_write_cb(uv_async_t *req)
     //     client->socks_recv_tcp_pending += to_write;
     // } while (client->socks_recv_buf_sent < client->socks_recv_buf_used);
 
-    client->write_cb = NULL;
+    client->cur_write = NULL;
 }
 
 static err_t uvl_client_recv_func (void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
@@ -160,29 +168,29 @@ static err_t uvl_client_recv_func (void *arg, struct tcp_pcb *tpcb, struct pbuf 
     } else {
         ASSERT(p->tot_len > 0)
 
-        struct uvl_tcp_buf *recv_buf = client->recv_buf;
+        struct uvl_tcp_recv_buf *buf = client->buf;
 
 #if UVL_RECV_BUF_MUTEX
-        uv_mutex_lock(&recv_buf->mutex);
+        uv_mutex_lock(&buf->mutex);
 #endif
-        if (p->tot_len > sizeof(recv_buf->buf) - recv_buf->used) {
+        if (p->tot_len > sizeof(buf->recv_buf) - buf->recv_used) {
             LLOG(LLOG_ERROR, "no buffer for data !?!");
 
 #if UVL_RECV_BUF_MUTEX
-            uv_mutex_unlock(&recv_buf->mutex);
+            uv_mutex_unlock(&buf->mutex);
 #endif
             return ERR_MEM;
         }
 
-        ASSERT(pbuf_copy_partial(p, recv_buf->buf + recv_buf->used, p->tot_len, 0) == p->tot_len)
-        recv_buf->used += p->tot_len;
+        ASSERT(pbuf_copy_partial(p, buf->recv_buf + buf->recv_used, p->tot_len, 0) == p->tot_len)
+        buf->recv_used += p->tot_len;
 
         pbuf_free(p);
 
         int ret = uv_async_send(&client->read_req);
 
 #if UVL_RECV_BUF_MUTEX
-        uv_mutex_unlock(&recv_buf->mutex);
+        uv_mutex_unlock(&buf->mutex);
 #endif
         return ret == 0 ? ERR_OK : ERR_ABRT;
     }
@@ -292,9 +300,17 @@ int uvl_read_start(uvl_tcp_t *client, uvl_alloc_cb alloc_cb, uvl_read_cb read_cb
 
 int uvl_write(uvl_write_t *req, uvl_tcp_t *client, const uv_buf_t bufs[], unsigned int nbufs, uvl_write_cb cb)
 {
-    client->send_bufs = bufs;
-    client->send_nbufs = nbufs;
-    client->write_cb = cb;
+    if (client->cur_write) {
+        return UV_ENOMEM;
+    }
+
+    req->client = client;
+    req->send_bufs = bufs;
+    req->send_nbufs = nbufs;
+    req->sent = 0;
+    req->write_cb = cb;
+
+    client->cur_write = req;
 
     return uv_async_send(&client->write_req);
 }
@@ -388,17 +404,15 @@ int uvl_tcp_init(uv_loop_t *loop, uvl_tcp_t *client)
     client->loop = loop;
     client->handle = NULL;
     client->read_cb = NULL;
-    client->write_cb = NULL;
     client->alloc_cb = NULL;
-    client->recv_buf = (struct uvl_tcp_buf *)malloc(sizeof(struct uvl_tcp_buf));
-    client->recv_buf->used = 0;
-    client->send_bufs = NULL;
-    client->send_nbufs = 0;
+    client->buf = (struct uvl_tcp_recv_buf *)malloc(sizeof(struct uvl_tcp_recv_buf));
+    client->buf->recv_used = 0;
+    client->cur_write = NULL;
     client->pcb = NULL;
     client->closed = 0;
 
 #if UVL_RECV_BUF_MUTEX
-    ret = uv_mutex_init(&client->recv_buf->mutex);
+    ret = uv_mutex_init(&client->buf->mutex);
     if (ret) return ret;
 #endif
 

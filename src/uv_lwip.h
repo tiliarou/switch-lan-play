@@ -39,9 +39,8 @@ struct uvl {
 struct uvl_tcp {
     UVL_FIELDS
     uvl_t *handle;
-    struct uvl_tcp_buf *recv_buf;
-    const uv_buf_t *send_bufs;
-    unsigned int send_nbufs;
+    struct uvl_tcp_recv_buf *buf;
+    uvl_write_t *cur_write;
 
     uv_async_t read_req;
     uv_async_t write_req;
@@ -49,14 +48,17 @@ struct uvl_tcp {
     int closed;
     uvl_alloc_tcp_cb alloc_cb;
     uvl_read_cb read_cb;
-    uvl_write_cb write_cb;
     struct tcp_pcb *pcb;
     struct sockaddr_in local_addr;
     struct sockaddr_in remote_addr;
 };
 struct uvl_write {
     UVL_FIELDS
-    uvl_tcp_t *handle;
+    uvl_tcp_t *client;
+    const uv_buf_t *send_bufs;
+    unsigned int send_nbufs;
+    uint32_t sent;
+    uvl_write_cb write_cb;
 };
 struct uvl_shutdown {
     UVL_FIELDS

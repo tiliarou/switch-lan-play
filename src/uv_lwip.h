@@ -39,8 +39,9 @@ struct uvl {
 struct uvl_tcp {
     UVL_FIELDS
     uvl_t *handle;
-    struct uvl_tcp_recv_buf *buf;
+    struct uvl_tcp_buf *buf;
     uvl_write_t *cur_write;
+    uvl_write_t *tail_write;
 
     uv_async_t read_req;
     uv_async_t write_req;
@@ -57,8 +58,13 @@ struct uvl_write {
     uvl_tcp_t *client;
     const uv_buf_t *send_bufs;
     unsigned int send_nbufs;
+    uint32_t sent_bufs;
     uint32_t sent;
+    uint32_t pending;
+    uint32_t total_len;
     uvl_write_cb write_cb;
+
+    uvl_write_t *next;
 };
 struct uvl_shutdown {
     UVL_FIELDS

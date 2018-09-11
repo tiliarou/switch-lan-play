@@ -14,17 +14,14 @@
 #define UVL_TCP_SEND_BUF_LEN 8192
 #define UVL_RECV_BUF_MUTEX 0
 
-struct uvl_tcp_recv_buf {
+struct uvl_tcp_buf {
     uint8_t recv_buf[UVL_TCP_RECV_BUF_LEN];
     uint16_t recv_used;
+    uint8_t send_buf[UVL_TCP_RECV_BUF_LEN];
+    uint16_t send_used;
 #if UVL_RECV_BUF_MUTEX
     uv_mutex_t mutex;
 #endif
-};
-
-struct uvl_tcp_send_buf {
-    uint8_t send_buf[UVL_TCP_RECV_BUF_LEN];
-    uint16_t send_used;
 };
 
 struct uvl_connection_req {
@@ -52,6 +49,10 @@ static void addr_from_lwip(void *ip, const ip_addr_t *ip_addr)
     } else {
         memcpy(ip, &ip_addr->u_addr.ip4.addr, 4);
     }
+}
+
+static void client_abort_client(uvl_tcp_t *client){
+    //
 }
 
 // make netif->input run in loop thread
@@ -92,7 +93,7 @@ static void uvl_async_connection_cb(uv_async_t *req)
 static void uvl_async_tcp_read_cb(uv_async_t *req)
 {
     uvl_tcp_t *client = (uvl_tcp_t *)req->data;
-    struct uvl_tcp_recv_buf *buf = client->buf;
+    struct uvl_tcp_buf *buf = client->buf;
     uv_buf_t b;
     int status = 0;
     int call_cb = 1;
@@ -128,37 +129,75 @@ static void uvl_async_tcp_write_cb(uv_async_t *async)
 {
     uvl_write_t *req = (uvl_write_t *)async->data;
     uvl_tcp_t *client = req->client;
+
+    uvl_imp_write_to_tcp(client);
+}
+
+static int uvl_imp_write_buf_to_tcp(uvl_tcp_t *client, uvl_write_t *req)
+{
+    uv_buf_t *buf = &req->send_bufs[req->sent_bufs];
+
+    do {
+        int to_write = LMIN(buf->len - req->sent, tcp_sndbuf(client->pcb));
+        if (to_write == 0) {
+            goto next;
+        }
+
+        err_t err = tcp_write(client->pcb, buf->base + req->sent, to_write, 0);
+        if (err != ERR_OK) {
+            if (err == ERR_MEM) {
+                return 0;
+            }
+            LLOG(LLOG_INFO, "tcp_write failed (%d)", (int)err);
+
+            client_abort_client(client);
+            return -1;
+        }
+        req->sent += to_write;
+        req->pending += to_write;
+    } while (req->sent < buf->len);
+
+next:
+    req->sent = 0;
+    req->sent_bufs++;
+    return 0;
+}
+
+/**
+ * This function will be called in pool thread
+ * or called from tcp_sent's callback.
+ */ 
+static void uvl_imp_write_to_tcp(uvl_tcp_t *client)
+{
     ASSERT(client->cur_write)
 
-    // do {
-    //     int to_write = LMIN(client->socks_recv_buf_used - client->socks_recv_buf_sent, tcp_sndbuf(client->pcb));
-    //     if (to_write == 0) {
-    //         break;
-    //     }
+    uvl_write_t *req = client->cur_write;
 
-    //     err_t err = tcp_write(client->pcb, client->socks_recv_buf + client->socks_recv_buf_sent, to_write, TCP_WRITE_FLAG_COPY);
-    //     if (err != ERR_OK) {
-    //         if (err == ERR_MEM) {
-    //             break;
-    //         }
 
-    //         client_log(client, BLOG_INFO, "tcp_write failed (%d)", (int)err);
+    while (req->sent_bufs == req->send_nbufs) {
+        req = req->next;
+    }
 
-    //         client_abort_client(client);
-    //         return -1;
-    //     }
+    while (req->sent_bufs < req->send_nbufs) {
+        if (uvl_imp_write_buf_to_tcp(client, req)) {
+            break;
+        }
+    }
 
-    //     client->socks_recv_buf_sent += to_write;
-    //     client->socks_recv_tcp_pending += to_write;
-    // } while (client->socks_recv_buf_sent < client->socks_recv_buf_used);
+    err_t err = tcp_output(client->pcb);
+    if (err != ERR_OK) {
+        LLOG(LLOG_INFO, "tcp_output failed (%d)", (int)err);
 
-    client->cur_write = NULL;
+        client_abort_client(client);
+        return;
+    }
 }
 
 static err_t uvl_client_recv_func (void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
 {
     uvl_tcp_t *client = (uvl_tcp_t *)arg;
     ASSERT(!client->closed)
+    ASSERT(client->pcb == tpcb)
     ASSERT(err == ERR_OK)
 
     if (!p) {
@@ -168,7 +207,7 @@ static err_t uvl_client_recv_func (void *arg, struct tcp_pcb *tpcb, struct pbuf 
     } else {
         ASSERT(p->tot_len > 0)
 
-        struct uvl_tcp_recv_buf *buf = client->buf;
+        struct uvl_tcp_buf *buf = client->buf;
 
 #if UVL_RECV_BUF_MUTEX
         uv_mutex_lock(&buf->mutex);
@@ -198,7 +237,31 @@ static err_t uvl_client_recv_func (void *arg, struct tcp_pcb *tpcb, struct pbuf 
 
 static err_t uvl_client_sent_func (void *arg, struct tcp_pcb *tpcb, u16_t len)
 {
+    uvl_tcp_t *client = (uvl_tcp_t *)arg;
+    uvl_write_t *req = client->cur_write;
 
+    ASSERT(!client->closed)
+    ASSERT(len > 0)
+
+    while (len > 0) {
+        int to_sub = LMIN(req->pending, len);
+        req->pending -= to_sub;
+        len -= to_sub;
+        req = req->next;
+    }
+
+    req = client->cur_write;
+
+    while (req->sent == req->total_len && req->pending == 0) {
+        // should call the callback
+        req->write_cb(req, 0);
+
+        req = req->next;
+    }
+
+    client->cur_write = req;
+
+    return ERR_OK;
 }
 
 static void uvl_client_err_func (void *arg, err_t err)
@@ -300,17 +363,30 @@ int uvl_read_start(uvl_tcp_t *client, uvl_alloc_cb alloc_cb, uvl_read_cb read_cb
 
 int uvl_write(uvl_write_t *req, uvl_tcp_t *client, const uv_buf_t bufs[], unsigned int nbufs, uvl_write_cb cb)
 {
-    if (client->cur_write) {
-        return UV_ENOMEM;
-    }
+    int i;
 
     req->client = client;
     req->send_bufs = bufs;
     req->send_nbufs = nbufs;
     req->sent = 0;
+    req->pending = 0;
+    req->sent_bufs = 0;
+    req->total_len = 0;
     req->write_cb = cb;
 
-    client->cur_write = req;
+    req->next = NULL;
+
+    if (client->tail_write) {
+        client->tail_write->next = req;
+    }
+    client->tail_write = req;
+    if (client->cur_write == NULL) {
+        client->cur_write = req;
+    }
+
+    for (i = 0; i < nbufs; i++) {
+        req->total_len += bufs[i].len;
+    }
 
     return uv_async_send(&client->write_req);
 }
@@ -405,9 +481,11 @@ int uvl_tcp_init(uv_loop_t *loop, uvl_tcp_t *client)
     client->handle = NULL;
     client->read_cb = NULL;
     client->alloc_cb = NULL;
-    client->buf = (struct uvl_tcp_recv_buf *)malloc(sizeof(struct uvl_tcp_recv_buf));
+    client->buf = (struct uvl_tcp_buf *)malloc(sizeof(struct uvl_tcp_buf));
     client->buf->recv_used = 0;
+    client->buf->send_used = 0;
     client->cur_write = NULL;
+    client->tail_write = NULL;
     client->pcb = NULL;
     client->closed = 0;
 

@@ -1,6 +1,7 @@
 #ifndef _LAN_PLAY_H_
 #define _LAN_PLAY_H_
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -29,7 +30,10 @@ struct lan_play {
     bool stop;
     uv_loop_t loop;
     uv_thread_t libpcap_thread;
-    uv_async_t get_packet_handle;
+    uv_async_t get_packet_async;
+    uv_sem_t get_packet_sem;
+    const struct pcap_pkthdr *pkthdr;
+    const u_char *packet;
 
     // lan_client
     uv_udp_t client;

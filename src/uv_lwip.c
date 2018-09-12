@@ -141,6 +141,8 @@ static int uvl_imp_write_buf_to_tcp(uvl_tcp_t *client, uvl_write_t *req)
 {
     const   uv_buf_t *buf = &req->send_bufs[req->sent_bufs];
 
+    if (req->sent_bufs == req->send_nbufs) goto next;
+
     do {
         int to_write = LMIN(buf->len - req->sent, tcp_sndbuf(client->pcb));
         if (to_write == 0) {
@@ -170,18 +172,21 @@ next:
 /**
  * This function will be called in pool thread
  * or called from tcp_sent's callback.
- */ 
+ */
 static void uvl_imp_write_to_tcp(uvl_tcp_t *client)
 {
     ASSERT(client->cur_write)
 
     uvl_write_t *req = client->cur_write;
 // TODO bugs here
-    while (req && req->sent_bufs == req->send_nbufs) {
+    while (req) {
+        if (req->sent_bufs < req->send_nbufs) {
+            break;
+        }
         req = req->next;
     }
 
-    while (req && req->sent_bufs < req->send_nbufs) {
+    while (req) {
         if (uvl_imp_write_buf_to_tcp(client, req)) {
             break;
         }

@@ -206,7 +206,7 @@ int gateway_init(struct gateway *gateway, struct packet_ctx *packet_ctx)
     g_gateway_send_packet_ctx = packet_ctx;
 
     // uv_loop_init(&gateway->loop);
-    gateway->loop = &packet_ctx->arg->loop;
+    gateway->loop = packet_ctx->arg->loop;
 
     ASSERT(uvl_init(gateway->loop, &gateway->uvl) == 0);
     ASSERT(uvl_bind(&gateway->uvl, gateway_uvl_output) == 0);

@@ -337,6 +337,8 @@ int main(int argc, char **argv)
     struct lan_play lan_play;
     int ret;
 
+    lan_play.loop = &lan_play.real_loop;
+
     if (parse_arguments(argc, argv) != 0) {
         LLOG(LLOG_ERROR, "Failed to parse arguments");
         print_help(argv[0]);
@@ -364,8 +366,8 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    assert(uv_loop_init(&lan_play.loop) == 0);
-    assert(uv_async_init(&lan_play.loop, &lan_play.get_packet_async, lan_play_get_packet_async_cb) == 0);
+    assert(uv_loop_init(lan_play.loop) == 0);
+    assert(uv_async_init(lan_play.loop, &lan_play.get_packet_async, lan_play_get_packet_async_cb) == 0);
     assert(uv_sem_init(&lan_play.get_packet_sem, 0) == 0);
     lan_play.get_packet_async.data = &lan_play;
 
@@ -373,5 +375,5 @@ int main(int argc, char **argv)
 
     ret = uv_thread_create(&lan_play.libpcap_thread, lan_play_libpcap_thread, &lan_play);
 
-    return uv_run(&lan_play.loop, UV_RUN_DEFAULT);
+    return uv_run(lan_play.loop, UV_RUN_DEFAULT);
 }

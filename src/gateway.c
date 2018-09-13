@@ -254,7 +254,8 @@ int gateway_process_udp(struct gateway *gateway, const uint8_t *data, int data_l
         // PRINT_IP(dst);
         // printf(":%d\n", dstport);
 
-        return gateway->proxy.udp(&gateway->proxy, src, srcport, dst, dstport, payload, len);;
+        gateway->proxy.udp(&gateway->proxy, src, srcport, dst, dstport, payload, len);
+        return 0;
     }
 
     return -1;

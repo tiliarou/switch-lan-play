@@ -18,7 +18,6 @@ static void proxy_udp_send_cb(uv_udp_send_t *req, int status)
     if (status < 0) {
         LLOG(LLOG_ERROR, "proxy_udp_send_cb %d", status);
     }
-    free(req->data);
     free(req);
 }
 
@@ -101,16 +100,16 @@ static int direct_udp(struct proxy *proxy, uint8_t src[4], uint16_t srcport, uin
     }
 
     uv_udp_send_t *req = (uv_udp_send_t *)malloc(sizeof(uv_udp_send_t));
-    uv_buf_t *buf = (uv_buf_t *)malloc(sizeof(uv_buf_t));
+    uv_buf_t buf;
     struct sockaddr_in addr;
 
-    buf->base = (char *)data;
-    buf->len = data_len;
-    req->data = buf;
+    buf.base = (char *)data;
+    buf.len = data_len;
+
     addr.sin_family = AF_INET;
     CPY_IPV4(&addr.sin_addr, dst);
     addr.sin_port = htons(dstport);
-    return uv_udp_send(req, udp, buf, 1, (struct sockaddr *)&addr, proxy_udp_send_cb);
+    return uv_udp_send(req, udp, &buf, 1, (struct sockaddr *)&addr, proxy_udp_send_cb);
 }
 
 static proxy_tcp_t *direct_tcp_new(struct proxy *proxy)

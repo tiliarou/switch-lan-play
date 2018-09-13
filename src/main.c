@@ -308,6 +308,7 @@ void lan_play_libpcap_thread(void *data)
 void lan_play_get_packet_async_cb(uv_async_t *async)
 {
     struct lan_play *lan_play = (struct lan_play *)async->data;
+    assert(lan_play == &real_lan_play);
 
     get_packet(&lan_play->packet_ctx, lan_play->pkthdr, lan_play->packet);
 

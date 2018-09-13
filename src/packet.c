@@ -120,7 +120,6 @@ int packet_init(
 
 void parse_ether(const u_char *packet, uint16_t len, struct ether_frame *ether)
 {
-    g_debug1 = packet;
     CPY_MAC(ether->dst, packet + ETHER_OFF_DST);
     CPY_MAC(ether->src, packet + ETHER_OFF_SRC);
     ether->raw = packet;
@@ -132,7 +131,6 @@ void parse_ether(const u_char *packet, uint16_t len, struct ether_frame *ether)
 int process_ether(struct packet_ctx *arg, const u_char *packet, uint16_t len)
 {
     struct ether_frame ether;
-    g_debug2 = packet;
     parse_ether(packet, len, &ether);
 
     if (CMP_MAC(ether.src, arg->mac)) {

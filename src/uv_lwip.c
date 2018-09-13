@@ -606,7 +606,7 @@ int uvl_tcp_init(uv_loop_t *loop, uvl_tcp_t *client)
 
 int uvl_tcp_close(uvl_tcp_t *client, uvl_tcp_close_cb close_cb)
 {
-    ASSERT(client->close_cb == NULL)
+    // ASSERT(client->close_cb == NULL)
 
     if (!client->closed) {
         uvl_client_close_func(client);
@@ -678,7 +678,6 @@ fail:
 
 int uvl_listen(uvl_t *handle, uvl_connection_cb connection_cb)
 {
-
     handle->connection_cb = connection_cb;
 
     // init listener

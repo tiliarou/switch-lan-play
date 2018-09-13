@@ -22,7 +22,7 @@ struct proxy {
     struct proxy_udp_item udp_table[PROXY_UDP_TABLE_LEN];
 
     int (*udp)(struct proxy *proxy, uint8_t src[4], uint16_t srcport, uint8_t dst[4], uint16_t dstport, const void *data, uint16_t data_len);
-    proxy_tcp_t *(*tcp_connect)();
+    int *(*tcp_connect)();
 };
 
 int proxy_direct_init(struct proxy *proxy, uv_loop_t *loop, struct packet_ctx *packet_ctx);

@@ -137,7 +137,7 @@ static void direct_tcp_connect_cb(uv_connect_t *r, int status)
     struct direct_tcp_connect_req *req = r->data;
 
     if (status == 0) {
-        req->cb(req->proxy, req->tcp);
+        req->cb(req->proxy, (proxy_tcp_t *)req->tcp);
     } else {
         req->cb(req->proxy, NULL);
         free(req->tcp);
@@ -146,7 +146,7 @@ static void direct_tcp_connect_cb(uv_connect_t *r, int status)
     free(req);
 }
 
-static int *direct_tcp_connect(struct proxy *proxy, const struct sockaddr *addr, proxy_connect_cb cb)
+static int direct_tcp_connect(struct proxy *proxy, const struct sockaddr *addr, proxy_connect_cb cb)
 {
     uv_tcp_t *tcp = malloc(sizeof(uv_tcp_t));
 
@@ -172,7 +172,6 @@ int proxy_direct_init(struct proxy *proxy, uv_loop_t *loop, struct packet_ctx *p
     memset(&proxy->udp_table, 0, sizeof(proxy->udp_table));
 
     proxy->udp = direct_udp;
-    proxy->tcp_new = direct_tcp_new;
 
     return 0;
 }

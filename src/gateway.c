@@ -161,7 +161,7 @@ void write_cb(uvl_write_t *req, int status)
 void p_read_cb(uv_stream_t *handle, ssize_t nread, const uv_buf_t *buf)
 {
     conn_t *conn = handle->data;
-    if (p_read_cb <= 0) {
+    if (nread <= 0) {
         LLOG(LLOG_DEBUG, "p_read_cb %d %s", nread, uv_strerror(nread));
         // free(buf->base);
         conn_kill(conn);

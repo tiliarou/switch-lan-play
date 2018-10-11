@@ -309,7 +309,10 @@ int lan_client_send(struct lan_play *lan_play, uint8_t type, const uint8_t *pack
         int ret = 0;
         int i, pos;
         int total_part;
-        total_part = len / pmtu + 1;
+        total_part = len / pmtu;
+        if (pmtu * total_part < len) {
+            total_part += 1;
+        }
         if (total_part > 1) {
             type = LAN_CLIENT_TYPE_IPV4_FRAG;
             int id = lan_play->frag_id++;

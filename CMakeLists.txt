@@ -70,6 +70,7 @@ set(SOURCE_FILES
     src/ipv4/icmp.c
 
     src/uv_lwip.c
+    src/cmp.c
 )
 
 add_executable(lan-play ${SOURCE_FILES})

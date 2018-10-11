@@ -9,6 +9,7 @@ enum ForwarderType {
   Keepalive = 0,
   Ipv4 = 1,
   Ping = 2,
+  Ipv4Frag = 3,
 }
 
 interface CacheItem {
@@ -86,6 +87,25 @@ export class SLPServer {
       case ForwarderType.Ping:
         this.onPing(rinfo, payload, msg)
         break
+      case ForwarderType.Ipv4Frag:
+        this.onIpv4Frag(rinfo, payload, msg)
+    }
+  }
+  onIpv4Frag (fromAddr: AddressInfo, payload: Buffer, msg: Buffer) {
+    if (payload.length <= 20) { // packet too short, ignore
+      return
+    }
+    const src = payload.readInt32BE(0)
+    const dst = payload.readInt32BE(4)
+    this.ipCache.set(src, {
+      rinfo: fromAddr,
+      expireAt: Date.now() + Timeout
+    })
+    if (this.ipCache.has(dst)) {
+      const { rinfo } = this.ipCache.get(dst)
+      this.sendTo(rinfo, msg)
+    } else {
+      this.sendBroadcast(fromAddr, msg)
     }
   }
   onPing (rinfo: AddressInfo, payload: Buffer, msg: Buffer) {

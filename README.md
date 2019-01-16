@@ -138,7 +138,7 @@ make
 ## Mac OS
 
 ```sh
-brew install cmake libpcap libuv
+brew install cmake libuv
 ```
 
 ```sh
@@ -157,7 +157,8 @@ make
 ## Node
 
 ```sh
-cd server
+git clone https://github.com/spacemeowx2/switch-lan-play
+cd switch-lan-play/server
 npm install
 npm run build # build ts to js. run it again when code changed.
 npm start

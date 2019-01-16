@@ -6,17 +6,19 @@ struct {
     int version;
 
     bool broadcast;
+    int pmtu;
     bool fake_internet;
+    bool list_if;
 
     char *netif;
     char *netif_ipaddr;
     char *netif_netmask;
 
-    char *socks_server_addr;
+    char *socks5_server_addr;
     char *relay_server_addr;
-    char *username;
-    char *password;
-    char *password_file;
+    char *socks5_username;
+    char *socks5_password;
+    char *socks5_password_file;
 } options;
 struct lan_play real_lan_play;
 
@@ -48,6 +50,39 @@ void get_mac(void *mac, pcap_if_t *d, pcap_t *p)
     putchar('\n');
 }
 
+int list_interfaces(pcap_if_t *alldevs)
+{
+    int i = 0;
+    pcap_if_t *d;
+    for (d = alldevs; d; d = d->next) {
+        printf("%d. %s", ++i, d->name);
+        if (d->description) {
+            printf(" (%s)", d->description);
+        } else {
+            printf(" (No description available)");
+        }
+        if (d->addresses) {
+            printf("\n\tIP: [");
+            struct pcap_addr *taddr;
+            struct sockaddr_in *sin;
+            char  revIP[100];
+            for (taddr = d->addresses; taddr; taddr = taddr->next)
+            {
+                sin = (struct sockaddr_in *)taddr->addr;
+                if (sin->sin_family == AF_INET) {
+                    strncpy(revIP, inet_ntoa(sin->sin_addr), sizeof(revIP));
+                    printf("%s", revIP);
+                    if (taddr->next)
+                        putchar(',');
+                }
+            }
+            putchar(']');
+        }
+        putchar('\n');
+    }
+    return i;
+}
+
 void init_pcap(struct lan_play *lan_play, void *mac)
 {
     pcap_t *dev;
@@ -62,33 +97,7 @@ void init_pcap(struct lan_play *lan_play, void *mac)
         exit(1);
     }
     if (options.netif == NULL) {
-        i = 0;
-        for (d = alldevs; d; d = d->next) {
-            printf("%d. %s", ++i, d->name);
-            if (d->description) {
-                printf(" (%s)", d->description);
-            } else {
-                printf(" (No description available)");
-            }
-            if (d->addresses) {
-                printf("\n\tIP: [");
-                struct pcap_addr *taddr;
-                struct sockaddr_in *sin;
-                char  revIP[100];
-                for (taddr = d->addresses; taddr; taddr = taddr->next)
-                {
-                    sin = (struct sockaddr_in *)taddr->addr;
-                    if (sin->sin_family == AF_INET) {
-                        strncpy(revIP, inet_ntoa(sin->sin_addr), sizeof(revIP));
-                        printf("%s", revIP);
-                        if (taddr->next)
-                            putchar(',');
-                    }
-                }
-                putchar(']');
-            }
-            putchar('\n');
-        }
+        i = list_interfaces(alldevs);
 
         printf("Enter the interface number (1-%d):", i);
         scanf("%d", &arg_inum);
@@ -142,14 +151,13 @@ int lan_play_close(struct lan_play *lan_play)
     if (ret != 0) return ret;
     ret = lan_client_close(lan_play);
     if (ret != 0) return ret;
-    ret = gateway_close(&lan_play->gateway);
+    ret = gateway_close(lan_play->gateway);
     if (ret != 0) return ret;
 
     ret = uv_signal_stop(&lan_play->signal_int);
     if (ret != 0) return ret;
 
     uv_close((uv_handle_t *)&lan_play->signal_int, NULL);
-    uv_close((uv_handle_t *)&lan_play->get_packet_async, NULL);
 
     return 0;
 }
@@ -163,8 +171,8 @@ int lan_play_init(struct lan_play *lan_play)
     uint8_t mac[6];
 
     lan_play->dev = NULL;
-    lan_play->stop = false;
     lan_play->broadcast = options.broadcast;
+    lan_play->pmtu = options.pmtu;
 
     init_pcap(lan_play, mac);
 
@@ -181,13 +189,29 @@ int lan_play_init(struct lan_play *lan_play)
         subnet_net,
         subnet_mask,
         mac,
-        30,
-        &lan_play->gateway
+        30
     );
     if (ret != 0) return ret;
     ret = lan_client_init(lan_play);
     if (ret != 0) return ret;
-    ret = gateway_init(&lan_play->gateway, &lan_play->packet_ctx, options.fake_internet);
+
+    struct sockaddr_in proxy_server;
+    struct sockaddr *proxy_server_ptr = NULL;
+    if (options.socks5_server_addr) {
+        proxy_server_ptr = (struct sockaddr *)&proxy_server;
+        if (parse_addr(options.socks5_server_addr, &proxy_server) != 0) {
+            LLOG(LLOG_ERROR, "Failed to parse and get ip address. --socks5-server-addr: %s", options.socks5_server_addr);
+            exit(1);
+        }
+    }
+    ret = gateway_init(
+        &lan_play->gateway,
+        &lan_play->packet_ctx,
+        options.fake_internet,
+        proxy_server_ptr,
+        options.socks5_username,
+        options.socks5_password
+    );
     if (ret != 0) return ret;
 
     return 0;
@@ -207,17 +231,19 @@ int parse_arguments(int argc, char **argv)
     options.version = 0;
 
     options.broadcast = false;
+    options.pmtu = 0;
     options.fake_internet = false;
+    options.list_if = false;
 
     options.netif = NULL;
     options.netif_ipaddr = NULL;
     options.netif_netmask = NULL;
 
-    options.socks_server_addr = NULL;
+    options.socks5_server_addr = NULL;
     options.relay_server_addr = NULL;
-    options.username = NULL;
-    options.password = NULL;
-    options.password_file = NULL;
+    options.socks5_username = NULL;
+    options.socks5_password = NULL;
+    options.socks5_password_file = NULL;
 
     int i;
     for (i = 0; i < argc; i++) {
@@ -239,48 +265,58 @@ int parse_arguments(int argc, char **argv)
             CHECK_PARAM();
             options.relay_server_addr = argv[i + 1];
             i++;
-        } else if (!strcmp(arg, "--socks-server-addr")) {
+        } else if (!strcmp(arg, "--socks5-server-addr")) {
             CHECK_PARAM();
-            options.socks_server_addr = argv[i + 1];
+            options.socks5_server_addr = argv[i + 1];
             i++;
-        } else if (!strcmp(arg, "--username")) {
+        } else if (!strcmp(arg, "--socks5-username")) {
             CHECK_PARAM();
-            options.username = argv[i + 1];
+            options.socks5_username = argv[i + 1];
             i++;
-        } else if (!strcmp(arg, "--password")) {
+        } else if (!strcmp(arg, "--socks5-password")) {
             CHECK_PARAM();
-            options.password = argv[i + 1];
+            options.socks5_password = argv[i + 1];
             i++;
-        } else if (!strcmp(arg, "--password-file")) {
+        } else if (!strcmp(arg, "--socks5-password-file")) {
             CHECK_PARAM();
-            options.password_file = argv[i + 1];
+            options.socks5_password_file = argv[i + 1];
             i++;
         } else if (!strcmp(arg, "--netif")) {
             CHECK_PARAM();
             options.netif = argv[i + 1];
             i++;
+        } else if (!strcmp(arg, "--list-if")) {
+            options.list_if = true;
         } else if (!strcmp(arg, "--broadcast")) {
             options.broadcast = true;
             options.relay_server_addr = "255.255.255.255:11451";
+        } else if (!strcmp(arg, "--pmtu")) {
+            CHECK_PARAM();
+            options.pmtu = atoi(argv[i + 1]);
+            i++;
         } else if (!strcmp(arg, "--fake-internet")) {
             options.fake_internet = true;
         }
     }
 
-    if (options.help || options.version) {
+    if (options.help || options.version || options.list_if) {
         return 0;
     }
     if (!options.relay_server_addr) {
-        fprintf(stderr, "--relay-server-addr is required\n");
+        if (options.socks5_server_addr) {
+            options.relay_server_addr = "127.0.0.1:11451";
+        } else {
+            fprintf(stderr, "--relay-server-addr is required\n");
+        }
         // return -1;
     }
-    if (options.username) {
-        if (!options.password && !options.password_file) {
+    if (options.socks5_username) {
+        if (!options.socks5_password && !options.socks5_password_file) {
             fprintf(stderr, "username given but password not given\n");
             return -1;
         }
 
-        if (options.password && options.password_file) {
+        if (options.socks5_password && options.socks5_password_file) {
             fprintf(stderr, "--password and --password-file cannot both be given\n");
             return -1;
         }
@@ -302,10 +338,12 @@ void print_help(const char *name)
         // "        [--netif-netmask <ipnetmask>] default: 255.255.0.0\n"
         "        [--relay-server-addr <addr>]\n"
         "        [--netif <netif>]\n"
-        // "        [--socks-server-addr <addr>]\n"
-        // "        [--username <username>]\n"
-        // "        [--password <password>]\n"
-        // "        [--password-file <file>]\n"
+        "        [--list-if]\n"
+        "        [--pmtu <pmtu>]\n"
+        "        [--socks5-server-addr <addr>]\n"
+        // "        [--socks5-username <username>]\n"
+        // "        [--socks5-password <password>]\n"
+        // "        [--socks5-password-file <file>]\n"
         "Address format is a.b.c.d:port (IPv4).\n",
         name
     );
@@ -314,50 +352,6 @@ void print_help(const char *name)
 void print_version()
 {
     printf("switch-lan-play " LANPLAY_VERSION "\n");
-}
-
-void lan_play_libpcap_thread(void *data)
-{
-    struct lan_play *lan_play = (struct lan_play *)data;
-    pcap_t *p = lan_play->dev;
-    struct pcap_pkthdr *pkt_header;
-    const u_char *packet;
-    int ret;
-
-    puts("pcap loop start");
-    while (1) {
-        ret = pcap_next_ex(p, &pkt_header, &packet);
-        if (lan_play->stop) {
-            break;
-        }
-        if (ret == 0) continue;
-        if (ret != 1) {
-            LLOG(LLOG_ERROR, "pcap_next_ex %d", ret);
-            assert(0);
-        }
-
-        lan_play->pkthdr = pkt_header;
-        lan_play->packet = packet;
-
-        if (uv_async_send(&lan_play->get_packet_async)) {
-            LLOG(LLOG_WARNING, "lan_play_get_packet uv_async_send");
-        }
-
-        uv_sem_wait(&lan_play->get_packet_sem);
-    }
-    puts("pcap loop stop");
-
-    pcap_close(lan_play->dev);
-}
-
-void lan_play_get_packet_async_cb(uv_async_t *async)
-{
-    struct lan_play *lan_play = (struct lan_play *)async->data;
-    assert(lan_play == &real_lan_play);
-
-    get_packet(&lan_play->packet_ctx, lan_play->pkthdr, lan_play->packet);
-
-    uv_sem_post(&lan_play->get_packet_sem);
 }
 
 int lan_play_gateway_send_packet(struct packet_ctx *packet_ctx, const void *data, uint16_t len)
@@ -390,7 +384,8 @@ void walk_cb(uv_handle_t* handle, void* arg)
 void lan_play_signal_cb(uv_signal_t *signal, int signum)
 {
     struct lan_play *lan_play = signal->data;
-    lan_play->stop = true;
+
+    uv_pcap_close(&lan_play->pcap, NULL);
     printf("stopping signum: %d\n", signum);
 
     int ret = lan_play_close(lan_play);
@@ -401,13 +396,19 @@ void lan_play_signal_cb(uv_signal_t *signal, int signum)
     uv_walk(lan_play->loop, walk_cb, lan_play);
 }
 
+void lan_play_pcap_handler(uv_pcap_t *handle, const struct pcap_pkthdr *pkt_header, const u_char *packet)
+{
+    struct lan_play *lan_play = handle->data;
+    get_packet(&lan_play->packet_ctx, pkt_header, packet);
+}
+
 int main(int argc, char **argv)
 {
     char relay_server_addr[128] = { 0 };
     struct lan_play *lan_play = &real_lan_play;
     int ret;
 
-    lan_play->loop = &lan_play->real_loop;
+    lan_play->loop = uv_default_loop();
 
     if (parse_arguments(argc, argv) != 0) {
         LLOG(LLOG_ERROR, "Failed to parse arguments");
@@ -424,6 +425,18 @@ int main(int argc, char **argv)
         print_version();
         return 0;
     }
+    if (options.list_if) {
+        pcap_if_t *alldevs;
+        char err_buf[PCAP_ERRBUF_SIZE];
+
+        if (pcap_findalldevs(&alldevs, err_buf)) {
+            fprintf(stderr, "Error pcap_findalldevs: %s\n", err_buf);
+            exit(1);
+        }
+        list_interfaces(alldevs);
+        pcap_freealldevs(alldevs);
+        return 0;
+    }
 
     if (options.relay_server_addr == NULL) {
         printf("Input the relay server address [ domain/ip:port ]:");
@@ -436,29 +449,18 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    RT_ASSERT(uv_loop_init(lan_play->loop) == 0);
-    RT_ASSERT(uv_async_init(lan_play->loop, &lan_play->get_packet_async, lan_play_get_packet_async_cb) == 0);
-    RT_ASSERT(uv_sem_init(&lan_play->get_packet_sem, 0) == 0);
     RT_ASSERT(uv_signal_init(lan_play->loop, &lan_play->signal_int) == 0);
     RT_ASSERT(uv_signal_start(&lan_play->signal_int, lan_play_signal_cb, SIGINT) == 0);
-    lan_play->get_packet_async.data = lan_play;
     lan_play->signal_int.data = lan_play;
 
     RT_ASSERT(lan_play_init(lan_play) == 0);
 
-    ret = uv_thread_create(&lan_play->libpcap_thread, lan_play_libpcap_thread, lan_play);
-    if (ret) {
-        LLOG(LLOG_ERROR, "uv_thread_create %d", ret);
-    }
+    RT_ASSERT(uv_pcap_init(lan_play->loop, &lan_play->pcap, lan_play_pcap_handler, lan_play->dev) == 0);
+    lan_play->pcap.data = lan_play;
 
     ret = uv_run(lan_play->loop, UV_RUN_DEFAULT);
     if (ret) {
         LLOG(LLOG_ERROR, "uv_run %d", ret);
-    }
-
-    ret = uv_thread_join(&lan_play->libpcap_thread);
-    if (ret) {
-        LLOG(LLOG_ERROR, "uv_thread_join %d", ret);
     }
 
     LLOG(LLOG_DEBUG, "lan_play exit %d", ret);

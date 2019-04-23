@@ -4,7 +4,7 @@ execute_process(COMMAND git describe --tags
     OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 if (LANPLAY_VERSION STREQUAL "")
-    set(LANPLAY_VERSION v0.0.7)
+    set(LANPLAY_VERSION v0.1.0)
     MESSAGE("git describe --tags output is empty, set version to ${LANPLAY_VERSION}")
 endif()
 
@@ -28,12 +28,17 @@ add_executable(lan-play ${src})
 
 target_compile_options(
     lan-play
-    PRIVATE "-Wall"
-    PRIVATE "-Wno-unused-function"
     PRIVATE "-DLANPLAY_VERSION=\"${LANPLAY_VERSION}\""
 )
+if (${CMAKE_CXX_COMPILER_ID} STREQUAL GNU)
+    target_compile_options(
+        lan-play
+        PRIVATE "-Wall"
+        PRIVATE "-Wno-unused-function"
+    )
+endif()
 
-set_target_properties(lan-play PROPERTIES CXX_STANDARD 14)
+set_target_properties(lan-play PROPERTIES CXX_STANDARD 17)
 
 target_link_libraries(lan-play base)
 target_link_libraries(lan-play uv_lwip)

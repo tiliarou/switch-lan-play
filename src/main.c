@@ -246,7 +246,7 @@ int parse_arguments(int argc, char **argv)
     options.socks5_password_file = NULL;
 
     int i;
-    for (i = 0; i < argc; i++) {
+    for (i = 1; i < argc; i++) {
         char *arg = argv[i];
 
         if (!strcmp(arg, "--help")) {
@@ -296,6 +296,11 @@ int parse_arguments(int argc, char **argv)
             i++;
         } else if (!strcmp(arg, "--fake-internet")) {
             options.fake_internet = true;
+        } else if (!strcmp(arg, "--set-ionbf")) {
+            setvbuf(stdout, NULL, _IONBF, 0);
+            setvbuf(stderr, NULL, _IONBF, 0);
+        } else {
+            LLOG(LLOG_WARNING, "unknown paramter: %s", arg);
         }
     }
 

@@ -412,6 +412,8 @@ static err_t uvl_netif_init_func (struct netif *netif)
 {
     netif->name[0] = 'h';
     netif->name[1] = 'o';
+    // fixed netif name to ho0
+    netif->num = 0;
     netif->output = uvl_netif_output_func;
 
     return ERR_OK;
@@ -710,6 +712,7 @@ int uvl_init(uv_loop_t *loop, uvl_t *handle)
     handle->listener = NULL;
     handle->waiting_pcb = NULL;
     handle->closed = 0;
+    handle->tcp_timer_mod4 = 0;
 
     int ret;
 

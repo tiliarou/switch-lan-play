@@ -1,39 +1,30 @@
 #ifndef _PCAPLOOP_H_
 #define _PCAPLOOP_H_
 
-#include <uv.h>
-#include <pcap.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#ifndef PCAPLOOP_USE_POLL
-#if defined(_WIN32)
-#define PCAPLOOP_USE_POLL 0
-#else
-#define PCAPLOOP_USE_POLL 1
-#endif
-#endif
+#include <uv.h>
+#include "pcap.h"
 
 typedef struct uv_pcap_s uv_pcap_t;
-typedef void (*uv_pcap_cb)(uv_pcap_t *handle, const struct pcap_pkthdr *pkt_header, const u_char *packet);
-typedef void (*uv_pcap_close_cb)(uv_pcap_t *handle);
+typedef void (*uv_pcap_cb)(uv_pcap_t *handle, const struct pcap_pkthdr *pkt_header, const u_char *packet, const uint8_t *mac);
 
+struct uv_pcap_inner;
 struct uv_pcap_s {
-#if PCAPLOOP_USE_POLL
-    int fd;
-    uv_poll_t poll;
-#else
-    uv_async_t get_packet_async;
-    uv_sem_t get_packet_sem;
-    uv_thread_t libpcap_thread;
-    const struct pcap_pkthdr *pkthdr;
-    const u_char *packet;
-#endif
-    pcap_t *dev;
-    uv_pcap_cb callback;
+    struct uv_pcap_inner *inner;
+    uv_pcap_cb cb;
 
     void *data;
 };
 
-int uv_pcap_init(uv_loop_t *loop, uv_pcap_t *handle, uv_pcap_cb cb, pcap_t *dev);
-void uv_pcap_close(uv_pcap_t *handle, uv_close_cb cb);
+int uv_pcap_init(uv_loop_t *loop, uv_pcap_t *handle, uv_pcap_cb cb);
+void uv_pcap_close(uv_pcap_t *handle);
+int uv_pcap_sendpacket(uv_pcap_t *handle, const u_char *data, int size);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

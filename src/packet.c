@@ -1,9 +1,6 @@
 #include "lan-play.h"
 #include <assert.h>
 
-void *g_debug1 = (void *)0x1234;
-void *g_debug2 = (void *)0x12345;
-
 int send_payloads(
     struct packet_ctx *self,
     const struct payload *payload
@@ -26,6 +23,9 @@ int send_payloads(
 
         part = part->next;
     }
+
+    self->upload_packet++;
+    self->upload_byte += total_len;
 
     // print_hex(self->buffer, total_len);
     // printf("total len %d\n", total_len);
@@ -71,21 +71,22 @@ int send_ether(
 
 void print_packet(const struct pcap_pkthdr *pkthdr, const u_char *packet)
 {
-    printf("Packet length: %d\n", pkthdr->len);
-    printf("Number of bytes: %d\n", pkthdr->caplen);
-    printf("Recieved time: %s", ctime((const time_t *)&pkthdr->ts.tv_sec));
+    eprintf("Packet length: %d\n", pkthdr->len);
+    eprintf("Number of bytes: %d\n", pkthdr->caplen);
+    eprintf("Recieved time: %s", ctime((const time_t *)&pkthdr->ts.tv_sec));
 
     uint32_t i;
     for (i=0; i<pkthdr->len; ++i) {
-        printf(" %02x", packet[i]);
+        eprintf(" %02x", packet[i]);
         if ( (i + 1) % 16 == 0 ) {
-            printf("\n");
+            eprintf("\n");
         }
     }
 
-    printf("\n\n");
+    eprintf("\n\n");
 }
 
+static u_char AnyMac[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 int packet_init(
     struct packet_ctx *self,
     struct lan_play *arg,
@@ -95,7 +96,6 @@ int packet_init(
     void *ip,
     void *subnet_net,
     void *subnet_mask,
-    void *mac,
     time_t arp_ttl)
 {
     self->arg = arg;
@@ -106,11 +106,16 @@ int packet_init(
     CPY_IPV4(self->subnet_net, subnet_net);
     CPY_IPV4(self->subnet_mask, subnet_mask);
 
-    CPY_MAC(self->mac, mac);
+    self->mac = AnyMac;
 
     self->identification = 0;
     arp_list_init(self->arp_list);
     self->arp_ttl = arp_ttl;
+
+    self->upload_packet = 0;
+    self->upload_byte = 0;
+    self->download_packet = 0;
+    self->download_byte = 0;
 
     return 0;
 }
@@ -150,12 +155,19 @@ int process_ether(struct packet_ctx *arg, const u_char *packet, uint16_t len)
     }
 }
 
+void packet_set_mac(struct packet_ctx *arg, const uint8_t *mac)
+{
+    arg->mac = mac;
+}
+
 void get_packet(struct packet_ctx *self, const struct pcap_pkthdr *pkthdr, const u_char *packet)
 {
     if (pkthdr->len >= 65536) {
         print_packet(pkthdr, packet);
         return;
     }
+    self->download_packet++;
+    self->download_byte += pkthdr->len;
     if (process_ether(self, packet, pkthdr->len) != 0) {
         print_packet(pkthdr, packet);
     }
@@ -182,14 +194,14 @@ void payload_print_hex(const struct payload *payload)
 
     while (part) {
         for (j = 0; j < part->len; j++) {
-            printf(" %02x", part->ptr[j]);
+            eprintf(" %02x", part->ptr[j]);
             if ( ++i % 16 == 0 ) {
-                printf("\n");
+                eprintf("\n");
             }
         }
 
         part = part->next;
     }
 
-    printf("\n\n");
+    eprintf("\n\n");
 }

@@ -139,10 +139,15 @@ struct packet_ctx {
     uint8_t ip[4];
     uint8_t subnet_net[4];
     uint8_t subnet_mask[4];
-    uint8_t mac[6];
+    const uint8_t *mac;
     uint16_t identification;
     struct arp_item arp_list[ARP_CACHE_LEN];
     time_t arp_ttl;
+
+    uint64_t upload_byte;
+    uint64_t download_byte;
+    uint64_t upload_packet;
+    uint64_t download_packet;
 };
 
 int packet_init(
@@ -154,11 +159,11 @@ int packet_init(
     void *ip,
     void *subnet_net,
     void *subnet_mask,
-    void *mac,
     time_t arp_ttl
 );
 int packet_close(struct packet_ctx *self);
 struct pcap_pkthdr;
+void packet_set_mac(struct packet_ctx *arg, const uint8_t *mac);
 void get_packet(struct packet_ctx *arg, const struct pcap_pkthdr * pkthdr, const u_char * packet);
 int process_arp(struct packet_ctx *arg, const struct ether_frame *ether);
 int process_ipv4(struct packet_ctx *arg, const struct ether_frame *ether);

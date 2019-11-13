@@ -146,6 +146,7 @@ struct gateway {
             } else {
                 this->uvlwip = std::make_shared<slp::UvLwip>(packet_ctx->arg->loop, packet_ctx, this->proxy);
             }
+            this->uvlwip->init();
         }
         int processUdp(const uint8_t *data, int data_len) {
             uint8_t ip_version = 0;
@@ -173,11 +174,6 @@ struct gateway {
                 dstport = READ_NET16(udp_base, UDP_OFF_DSTPORT);
                 payload = udp_base + UDP_OFF_END;
                 len = data_len - ipv4_header_len - UDP_OFF_END;
-
-                // PRINT_IP(src);
-                // printf(":%d -> ", srcport);
-                // PRINT_IP(dst);
-                // printf(":%d\n", dstport);
 
                 this->proxy->udpSend(src, srcport, dst, dstport, payload, len);
                 return 0;

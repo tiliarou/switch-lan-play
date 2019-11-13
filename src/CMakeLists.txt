@@ -4,13 +4,14 @@ execute_process(COMMAND git describe --tags
     OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 if (LANPLAY_VERSION STREQUAL "")
-    set(LANPLAY_VERSION v0.1.0)
+    set(LANPLAY_VERSION v0.2.0)
     MESSAGE("git describe --tags output is empty, set version to ${LANPLAY_VERSION}")
 endif()
 
 set(src
     main.c
-    pcaploop.c
+    lan-play.c
+    pcaploop.cpp
     packet.c
     arp.c
     helper.c
@@ -22,6 +23,11 @@ set(src
     ipv4/tcp.c
     ipv4/udp.c
     ipv4/icmp.c
+    rpc/rpc.cpp
+    rpc/lan-play.cpp
+    rpc/rpc-server.cpp
+    rpc/rpc-ws-server.cpp
+    rpc/sha1.c
 )
 
 add_executable(lan-play ${src})
@@ -40,6 +46,9 @@ endif()
 
 set_target_properties(lan-play PROPERTIES CXX_STANDARD 17)
 
+if(NOT ((CMAKE_SYSTEM_NAME STREQUAL "Darwin") OR MSVC))
+    target_link_libraries(lan-play atomic)
+endif()
 target_link_libraries(lan-play base)
 target_link_libraries(lan-play uv_lwip)
 target_link_libraries(lan-play uv_a)
@@ -54,7 +63,9 @@ if (WIN32)
     # https://stackoverflow.com/questions/13768515/how-to-do-static-linking-of-libwinpthread-1-dll-in-mingw
     target_link_libraries(lan-play -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
 else()
-    target_link_libraries(lan-play pthread)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
+        target_link_libraries(lan-play pthread)
+    endif()
 endif()
 
 INSTALL(TARGETS lan-play RUNTIME DESTINATION bin)
